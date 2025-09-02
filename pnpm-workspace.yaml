@@ -1,0 +1,17 @@
+packages:
+  - "apps/*"
+  - "packages/*"
+
+# Pacotes autorizados a rodar scripts de instalação.
+# Todos precisam baixar ou compilar binários nativos para funcionar.
+allowBuilds:
+  esbuild: true
+  "@prisma/client": true
+  "@prisma/engines": true
+  prisma: true
+  sharp: true
+  "@tailwindcss/oxide": true
+  "@nestjs/core": true
+  unrs-resolver: true
+  # Telemetria de terceiros — sem função no projeto, bloqueada.
+  '@scarf/scarf': false

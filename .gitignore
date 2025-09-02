@@ -1,0 +1,46 @@
+# dependências
+node_modules/
+.pnpm-store/
+
+# build
+dist/
+build/
+.next/
+out/
+*.tsbuildinfo
+
+# cache
+.turbo/
+.cache/
+.eslintcache
+coverage/
+
+# ambiente
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# banco / infra local
+docker/data/
+*.dump
+
+# editores / SO
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+.idea/
+.DS_Store
+Thumbs.db
+
+# logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# temporários: uploads de importação e arquivos de marca gerados
+tmp/
+uploads/
+
+# arquivos de marca enviados pelo painel (nunca versionar)
+apps/web/public/branding/
