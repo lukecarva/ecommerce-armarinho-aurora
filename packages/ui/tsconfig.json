@@ -1,0 +1,8 @@
+{
+  "extends": "@aurora/config/tsconfig/react.json",
+  "compilerOptions": {
+    "jsx": "react-jsx"
+  },
+  "include": ["src/**/*.ts", "src/**/*.tsx"],
+  "exclude": ["node_modules"]
+}

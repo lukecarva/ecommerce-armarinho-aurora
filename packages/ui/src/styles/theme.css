@@ -1,0 +1,120 @@
+/**
+ * Design system da Armarinho Aurora.
+ *
+ * Tokens extraídos do design aprovado. Tudo que é cor, espaçamento ou raio
+ * mora aqui — nenhum componente inventa valor solto.
+ *
+ * As três cores da marca também existem como variáveis sobrescrevíveis em
+ * tempo de execução (`--brand-*`), porque o painel admin permite ajustá-las
+ * sem novo deploy (módulo Identidade Visual).
+ */
+
+@theme {
+  /* ── Azul da marca — header, rodapé, elementos de navegação ───────── */
+  --color-brand-50: #eef2fb;
+  --color-brand-100: #d6e0f5;
+  --color-brand-200: #adc0eb;
+  --color-brand-300: #7f9ade;
+  --color-brand-400: #4f6fc9;
+  --color-brand-500: #2f52b0;
+  --color-brand-600: #1b3a8c; /* cor principal do design */
+  --color-brand-700: #16307a;
+  --color-brand-800: #112558;
+  --color-brand-900: #0b1938;
+
+  /* ── Amarelo — botões de ação, destaques, "Adicionar" ─────────────── */
+  --color-accent-50: #fffaeb;
+  --color-accent-100: #fff1c6;
+  --color-accent-200: #ffe28a;
+  --color-accent-300: #ffd24d;
+  --color-accent-400: #fdc300; /* cor principal do design */
+  --color-accent-500: #e0a900;
+  --color-accent-600: #b88500;
+  --color-accent-700: #8f6600;
+
+  /* ── Vermelho — preço, promoção, alertas ──────────────────────────── */
+  --color-price-50: #fef2f2;
+  --color-price-100: #fde0e0;
+  --color-price-300: #f38c8c;
+  --color-price-500: #e30613; /* cor principal do design */
+  --color-price-600: #c00510;
+  --color-price-700: #98040d;
+
+  /* ── Verde — disponibilidade e WhatsApp ───────────────────────────── */
+  --color-stock-50: #f0fdf4;
+  --color-stock-500: #16a34a;
+  --color-stock-600: #15803d;
+  --color-whatsapp: #25d366;
+  --color-whatsapp-dark: #1da851;
+
+  /* ── Neutros ──────────────────────────────────────────────────────── */
+  --color-ink-50: #f8fafc;
+  --color-ink-100: #f1f5f9;
+  --color-ink-200: #e2e8f0;
+  --color-ink-300: #cbd5e1;
+  --color-ink-400: #94a3b8;
+  --color-ink-500: #64748b;
+  --color-ink-600: #475569;
+  --color-ink-700: #334155;
+  --color-ink-800: #1e293b;
+  --color-ink-900: #0f172a;
+
+  /* ── Tipografia ───────────────────────────────────────────────────── */
+  --font-sans:
+    'Inter Variable', 'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto,
+    'Helvetica Neue', Arial, sans-serif;
+
+  /* ── Raios — o design usa cantos generosos ────────────────────────── */
+  --radius-card: 0.75rem;
+  --radius-button: 0.625rem;
+  --radius-pill: 9999px;
+
+  /* ── Sombras suaves, sem peso ─────────────────────────────────────── */
+  --shadow-card: 0 1px 2px rgb(15 23 42 / 0.06), 0 4px 12px rgb(15 23 42 / 0.05);
+  --shadow-nav: 0 -1px 3px rgb(15 23 42 / 0.08);
+
+  /* ── Altura da navegação inferior (mobile) ────────────────────────── */
+  --spacing-bottom-nav: 4.25rem;
+}
+
+/**
+ * Cores sobrescrevíveis pelo painel. O layout injeta estes valores a partir
+ * de `settings.branding`; os padrões abaixo são as cores oficiais da marca.
+ */
+:root {
+  --brand-primary: var(--color-brand-600);
+  --brand-secondary: var(--color-accent-400);
+  --brand-highlight: var(--color-price-500);
+}
+
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    background-color: var(--color-ink-100);
+    color: var(--color-ink-800);
+    font-family: var(--font-sans);
+    /* A navegação inferior fixa não pode cobrir o conteúdo. */
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+
+  /* Foco visível e consistente — requisito de acessibilidade (WCAG 2.1 AA). */
+  :focus-visible {
+    outline: 2px solid var(--color-brand-600);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+
+  /* Respeita quem pediu menos movimento no sistema. */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}
