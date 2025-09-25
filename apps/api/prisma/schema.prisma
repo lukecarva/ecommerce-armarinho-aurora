@@ -1,0 +1,1320 @@
+// Armarinho Aurora — schema inicial (Sprint 0)
+//
+// Cobre catálogo, configuração da loja e grupos de preço. Pedidos, carrinho,
+// cupons, CMS e cursos entram nas sprints seguintes, conforme o planejamento.
+//
+// Convenções:
+// - Preço é `Decimal(10,2)` no banco; a API converte para centavos inteiros na borda.
+// - Quantidade é `Decimal(10,3)` — tecido é vendido em frações de metro.
+// - `skuFutura` é a chave de casamento com a exportação do ERP.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────── Identidade e acesso ───────────────────────────
+
+model Role {
+  id          String      @id @default(uuid())
+  name        String      @unique
+  description String?
+  /// Lista de permissões no formato "modulo:acao", ex.: ["produtos:editar"]
+  permissions Json        @default("[]")
+  users       AdminUser[]
+  createdAt   DateTime    @default(now())
+
+  @@map("roles")
+}
+
+model AdminUser {
+  id           String         @id @default(uuid())
+  name         String
+  email        String         @unique
+  passwordHash String         @map("password_hash")
+  totpSecret   String?        @map("totp_secret")
+  active       Boolean        @default(true)
+  lastLoginAt  DateTime?      @map("last_login_at")
+  roleId       String         @map("role_id")
+  role         Role           @relation(fields: [roleId], references: [id])
+  auditLogs     AuditLog[]
+  sessions      AdminSession[]
+  uploads       MediaAsset[]
+  orderEvents   OrderEvent[]
+  tasksCreated  Task[]         @relation("TaskCreatedBy")
+  tasksAssigned Task[]         @relation("TaskAssignee")
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
+  @@map("admin_users")
+}
+
+/// Sessões de refresh do painel.
+///
+/// Guardamos o hash do refresh token (nunca o token) para conseguir revogar
+/// acesso de um dispositivo específico e detectar reuso de token roubado:
+/// se um refresh já rotacionado voltar, a família inteira cai.
+model AdminSession {
+  id         String    @id @default(uuid())
+  userId     String    @map("user_id")
+  user       AdminUser @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash  String    @unique @map("token_hash")
+  userAgent  String?   @map("user_agent")
+  ip         String?
+  expiresAt  DateTime  @map("expires_at")
+  revokedAt  DateTime? @map("revoked_at")
+  createdAt  DateTime  @default(now())
+  lastUsedAt DateTime  @default(now()) @map("last_used_at")
+
+  @@index([userId, revokedAt])
+  @@map("admin_sessions")
+}
+
+model AuditLog {
+  id        String     @id @default(uuid())
+  actorId   String?    @map("actor_id")
+  actor     AdminUser? @relation(fields: [actorId], references: [id])
+  entity    String
+  entityId  String     @map("entity_id")
+  action    String
+  /// Diferença aplicada: { campo: { de, para } }
+  diff      Json?
+  ip        String?
+  createdAt DateTime   @default(now())
+
+  @@index([entity, entityId])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
+
+// ─────────────────────────────── Catálogo ──────────────────────────────────
+
+model Category {
+  id       String     @id @default(uuid())
+  parentId String?    @map("parent_id")
+  parent   Category?  @relation("CategoryTree", fields: [parentId], references: [id])
+  children Category[] @relation("CategoryTree")
+
+  name     String
+  slug     String  @unique
+  imageUrl String? @map("image_url")
+  position Int     @default(0)
+  active   Boolean @default(true)
+  /// { title, description, keywords }
+  seo      Json?
+
+  products  Product[]
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  @@index([parentId, position])
+  @@map("categories")
+}
+
+model Brand {
+  id       String    @id @default(uuid())
+  name     String
+  slug     String    @unique
+  products Product[]
+
+  @@map("brands")
+}
+
+enum CollectionType {
+  sazonal
+  oferta
+  curadoria
+
+  @@map("collection_type")
+}
+
+/// Agrupamento editorial de produtos: "Natal 2026", "Ofertas da semana".
+/// Diferente de categoria — um produto pertence a uma categoria, mas pode
+/// entrar e sair de várias coleções, inclusive com data marcada.
+model Collection {
+  id          String         @id @default(uuid())
+  name        String
+  slug        String         @unique
+  type        CollectionType @default(curadoria)
+  description String?
+  bannerUrl   String?        @map("banner_url")
+  /// Entra e sai da vitrine sozinha nas datas marcadas.
+  startsAt    DateTime?      @map("starts_at")
+  endsAt      DateTime?      @map("ends_at")
+  active      Boolean        @default(true)
+  position    Int            @default(0)
+  seo         Json?
+
+  products  CollectionProduct[]
+  createdAt DateTime            @default(now())
+  updatedAt DateTime            @updatedAt
+
+  @@index([active, position])
+  @@map("collections")
+}
+
+model CollectionProduct {
+  collectionId String     @map("collection_id")
+  collection   Collection @relation(fields: [collectionId], references: [id], onDelete: Cascade)
+  productId    String     @map("product_id")
+  product      Product    @relation(fields: [productId], references: [id], onDelete: Cascade)
+  position     Int        @default(0)
+
+  @@id([collectionId, productId])
+  @@index([collectionId, position])
+  @@map("collection_products")
+}
+
+enum SaleUnit {
+  metro
+  unidade
+  pacote
+  kg
+  conjunto
+
+  @@map("sale_unit")
+}
+
+enum ProductStatus {
+  rascunho
+  ativo
+  inativo
+  arquivado
+
+  @@map("product_status")
+}
+
+enum Availability {
+  em_estoque
+  ultimas_unidades
+  sob_consulta
+  esgotado
+
+  @@map("availability")
+}
+
+enum InventorySource {
+  manual
+  import
+
+  @@map("inventory_source")
+}
+
+model Product {
+  id          String  @id @default(uuid())
+  /// Código do produto no Futura — chave de casamento na importação
+  skuFutura   String? @unique @map("sku_futura")
+  name        String
+  slug        String  @unique
+  shortDesc   String? @map("short_desc")
+  description String?
+
+  categoryId String?   @map("category_id")
+  category   Category? @relation(fields: [categoryId], references: [id])
+  brandId    String?   @map("brand_id")
+  brand      Brand?    @relation(fields: [brandId], references: [id])
+
+  unit     SaleUnit @default(unidade)
+  /// Menor fração vendável. 0.5 = tecido de meio em meio metro.
+  saleStep Decimal  @default(1) @map("sale_step") @db.Decimal(10, 3)
+  /// Quantidade mínima do pedido.
+  minQty   Decimal  @default(1) @map("min_qty") @db.Decimal(10, 3)
+  /// Itens por embalagem, quando vendido em pacote.
+  packSize Int?     @map("pack_size")
+
+  price         Decimal   @db.Decimal(10, 2)
+  promoPrice    Decimal?  @map("promo_price") @db.Decimal(10, 2)
+  promoStartsAt DateTime? @map("promo_starts_at")
+  promoEndsAt   DateTime? @map("promo_ends_at")
+
+  /// Atributos livres por categoria: { largura, composicao, gramatura }
+  attributes   Json          @default("{}")
+  status       ProductStatus @default(rascunho)
+  /// Veio da importação sem foto/categoria — nunca aparece na vitrine
+  needsContent Boolean       @default(false) @map("needs_content")
+  seo          Json?
+
+  /// Índice textual da busca, gerado pelo próprio Postgres (`GENERATED ALWAYS
+  /// AS ... STORED`) com a configuração `pt_unaccent`.
+  ///
+  /// O Prisma não modela coluna gerada: `dbgenerated()` sem argumento é a
+  /// forma de dizer "o banco preenche, não mexa". Sem isso ele gera uma
+  /// migração que derruba a expressão e a busca para de funcionar em silêncio.
+  searchVector Unsupported("tsvector")? @default(dbgenerated()) @map("search_vector")
+
+  variants     ProductVariant[]
+  images       ProductImage[]
+  inventory    Inventory[]
+  cartItems    CartItem[]
+  favoritedBy  Favorite[]
+  priceTiers   PriceTier[]
+  collections  CollectionProduct[]
+  priceHistory PriceHistory[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([categoryId, status])
+  @@index([status, needsContent])
+  // Busca tolerante a erro de digitação ("tricolini" acha "tricoline").
+  // Declarado aqui, e não só em SQL, para o Prisma não tentar derrubá-lo na
+  // próxima migration.
+  @@index([name(ops: raw("gin_trgm_ops"))], map: "products_name_trgm", type: Gin)
+  @@index([shortDesc(ops: raw("gin_trgm_ops"))], map: "products_short_desc_trgm", type: Gin)
+  @@index([searchVector], map: "products_search_vector", type: Gin)
+  @@map("products")
+}
+
+model ProductVariant {
+  id        String  @id @default(uuid())
+  productId String  @map("product_id")
+  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  skuFutura  String? @unique @map("sku_futura")
+  name       String
+  color      String?
+  colorHex   String? @map("color_hex")
+  size       String?
+  /// Diferença sobre o preço do produto (pode ser negativa)
+  priceDelta Decimal @default(0) @map("price_delta") @db.Decimal(10, 2)
+  position   Int     @default(0)
+
+  images    ProductImage[]
+  inventory Inventory[]
+  cartItems CartItem[]
+
+  @@index([productId, position])
+  @@map("product_variants")
+}
+
+/// Biblioteca de mídia reutilizável.
+///
+/// Uma imagem enviada uma vez pode ser usada em vários produtos, banners e na
+/// identidade visual. `variants` guarda as derivações geradas pelo `sharp`
+/// (AVIF e WebP em 4 larguras) para a vitrine escolher a melhor no `srcset`.
+model MediaAsset {
+  id       String  @id @default(uuid())
+  /// Caminho no bucket, ex.: "produtos/2026/09/abc123.jpg"
+  key      String  @unique
+  /// URL da imagem original já processada
+  url      String
+  mime     String
+  size     Int
+  width    Int?
+  height   Int?
+  /// Placeholder de baixa resolução — evita salto de layout ao carregar
+  blurhash String?
+  alt      String?
+  folder   String  @default("geral")
+  /// [{ label, width, format, url, size }]
+  variants Json    @default("[]")
+
+  uploadedById String?    @map("uploaded_by_id")
+  uploadedBy   AdminUser? @relation(fields: [uploadedById], references: [id], onDelete: SetNull)
+
+  images    ProductImage[]
+  createdAt DateTime       @default(now())
+
+  @@index([folder, createdAt])
+  @@map("media_assets")
+}
+
+model ProductImage {
+  id        String          @id @default(uuid())
+  productId String          @map("product_id")
+  product   Product         @relation(fields: [productId], references: [id], onDelete: Cascade)
+  variantId String?         @map("variant_id")
+  variant   ProductVariant? @relation(fields: [variantId], references: [id], onDelete: SetNull)
+  mediaId   String          @map("media_id")
+  media     MediaAsset      @relation(fields: [mediaId], references: [id], onDelete: Cascade)
+
+  alt      String?
+  position Int     @default(0)
+
+  @@unique([productId, mediaId])
+  @@index([productId, position])
+  @@map("product_images")
+}
+
+model Inventory {
+  id        String          @id @default(uuid())
+  productId String          @map("product_id")
+  product   Product         @relation(fields: [productId], references: [id], onDelete: Cascade)
+  variantId String?         @map("variant_id")
+  variant   ProductVariant? @relation(fields: [variantId], references: [id], onDelete: Cascade)
+
+  qty               Decimal         @default(0) @db.Decimal(12, 3)
+  /// Abaixo disso a vitrine exibe "Últimas unidades"
+  lowStockThreshold Decimal         @default(3) @map("low_stock_threshold") @db.Decimal(12, 3)
+  /// O que o cliente vê. Nunca exibimos a quantidade exata.
+  availability      Availability    @default(sob_consulta)
+  source            InventorySource @default(manual)
+
+  movements InventoryMovement[]
+  updatedAt DateTime            @updatedAt
+
+  // No Postgres dois NULL são distintos, então este índice sozinho NÃO impede
+  // duas linhas de estoque para o mesmo produto sem variação. A brecha é
+  // fechada pelo índice parcial `inventory_produto_sem_variacao`, criado na
+  // migration `20260908210500_busca_e_indices`.
+  @@unique([productId, variantId])
+  @@map("inventory")
+}
+
+/// Histórico de preço.
+///
+/// Guardado porque preço exibido vincula a loja (CDC art. 30): quando um
+/// cliente reclama que "ontem estava mais barato", isto responde com data e
+/// origem da mudança.
+model PriceHistory {
+  id        String   @id @default(uuid())
+  productId String   @map("product_id")
+  product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  oldPrice  Decimal  @map("old_price") @db.Decimal(10, 2)
+  newPrice  Decimal  @map("new_price") @db.Decimal(10, 2)
+  /// "manual" | "import" | "lote"
+  source    String
+  actorId   String?  @map("actor_id")
+  createdAt DateTime @default(now())
+
+  @@index([productId, createdAt])
+  @@map("price_history")
+}
+
+model InventoryMovement {
+  id          String    @id @default(uuid())
+  inventoryId String    @map("inventory_id")
+  inventory   Inventory @relation(fields: [inventoryId], references: [id], onDelete: Cascade)
+
+  delta   Decimal @db.Decimal(12, 3)
+  reason  String
+  actorId String? @map("actor_id")
+
+  createdAt DateTime @default(now())
+
+  @@index([inventoryId, createdAt])
+  @@map("inventory_movements")
+}
+
+// ───────────────── Preços por grupo — atacado (oculto na v1) ────────────────
+
+model CustomerGroup {
+  id              String  @id @default(uuid())
+  name            String
+  slug            String  @unique
+  isDefault       Boolean @default(false) @map("is_default")
+  /// Desconto linear opcional aplicado ao grupo
+  discountPercent Decimal @default(0) @map("discount_percent") @db.Decimal(5, 2)
+
+  priceTiers PriceTier[]
+  customers  Customer[]
+
+  @@map("customer_groups")
+}
+
+/// Cobre dois casos com uma tabela só: preço por grupo de cliente
+/// (atacado) e preço por quantidade ("acima de 10 metros, R$ 13,90").
+model PriceTier {
+  id        String         @id @default(uuid())
+  productId String         @map("product_id")
+  product   Product        @relation(fields: [productId], references: [id], onDelete: Cascade)
+  groupId   String?        @map("group_id")
+  group     CustomerGroup? @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  minQty Decimal @default(1) @map("min_qty") @db.Decimal(10, 3)
+  price  Decimal @db.Decimal(10, 2)
+
+  @@unique([productId, groupId, minQty])
+  @@index([productId])
+  @@map("price_tiers")
+}
+
+model Customer {
+  id              String         @id @default(uuid())
+  name            String
+  email           String?        @unique
+  phoneE164       String         @map("phone_e164")
+  passwordHash    String?        @map("password_hash")
+  emailVerifiedAt DateTime?      @map("email_verified_at")
+  groupId         String?        @map("group_id")
+  group           CustomerGroup? @relation(fields: [groupId], references: [id])
+  /// Consentimentos LGPD: { termos: { versao, aceitoEm, ip }, marketing: { ... } }
+  consent         Json           @default("{}")
+  /// Aceitou receber novidades por e-mail. Coluna própria, e não só o JSON de
+  /// consentimento, porque é por ela que se filtra quem recebe o aviso de
+  /// cupom novo — e e-mail de marketing sem aceite é o que a LGPD proíbe.
+  acceptsMarketing Boolean       @default(false) @map("accepts_marketing")
+  lastLoginAt      DateTime?     @map("last_login_at")
+  /// Preenchido quando os dados pessoais foram apagados a pedido do titular.
+  anonymizedAt     DateTime?     @map("anonymized_at")
+
+  carts         Cart[]
+  orders        Order[]
+  redemptions   CouponRedemption[]
+  sessions      CustomerSession[]
+  tokens        CustomerToken[]
+  addresses     Address[]
+  favorites     Favorite[]
+  notifications Notification[]
+  enrollments   CourseEnrollment[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([phoneE164])
+  @@map("customers")
+}
+
+// ──────────────────────────── Entrega e loja ───────────────────────────────
+
+enum DeliveryType {
+  retirada
+  motoboy
+  combinar
+
+  @@map("delivery_type")
+}
+
+/// Opções de entrega. Não existe cálculo de frete: o valor do motoboy é
+/// combinado no WhatsApp. O tipo permite cadastrar novas opções sem código.
+model DeliveryMethod {
+  id          String       @id @default(uuid())
+  label       String
+  description String?
+  type        DeliveryType
+  /// Texto exibido, nunca um número calculado: "Grátis" | "Consultar valor"
+  priceLabel  String       @map("price_label")
+  asksAddress Boolean      @default(false) @map("asks_address")
+  active      Boolean      @default(true)
+  position    Int          @default(0)
+
+  orders Order[]
+
+  @@map("delivery_methods")
+}
+
+model BusinessHour {
+  /// 0 = domingo … 6 = sábado
+  weekday  Int     @id
+  opensAt  String  @map("opens_at")
+  closesAt String  @map("closes_at")
+  closed   Boolean @default(false)
+
+  @@map("business_hours")
+}
+
+model Holiday {
+  date  DateTime @id @db.Date
+  label String
+
+  @@map("holidays")
+}
+
+/// Configurações da loja em pares chave/valor: dados cadastrais, identidade
+/// visual (logo, favicon, cores) e templates de mensagem.
+model Setting {
+  key       String   @id
+  value     Json
+  updatedAt DateTime @updatedAt
+
+  @@map("settings")
+}
+
+// ───────────────────── Importação e exportação de catálogo ─────────────────
+
+enum ImportKind {
+  /// Cria e atualiza produtos a partir da exportação do Futura
+  produtos
+  /// Só mexe em preço, com registro em price_history
+  precos
+  /// Só mexe em quantidade e disponibilidade
+  estoque
+
+  @@map("import_kind")
+}
+
+enum ImportStatus {
+  /// Simulação: mostra o que mudaria, sem gravar nada
+  simulado
+  processando
+  concluido
+  falhou
+  desfeito
+
+  @@map("import_status")
+}
+
+/// Mapeamento de colunas salvo.
+///
+/// A exportação do Futura tem sempre os mesmos cabeçalhos, então o operador
+/// configura uma vez e nas próximas importações é um clique.
+model ImportProfile {
+  id        String     @id @default(uuid())
+  name      String
+  kind      ImportKind
+  /// { "COD_PRODUTO": "skuFutura", "DESCRICAO": "name", "VLR_VENDA": "price" }
+  columnMap Json       @map("column_map")
+  /// { delimiter, encoding, atualizarNome, criarAusentes, markupPercent }
+  options   Json       @default("{}")
+
+  runs      ImportRun[]
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+
+  @@unique([name, kind])
+  @@map("import_profiles")
+}
+
+/// Histórico de cada importação, incluindo as simulações.
+///
+/// `snapshot` guarda o valor anterior de cada campo alterado — é o que
+/// permite desfazer uma importação que entrou errada.
+model ImportRun {
+  id       String       @id @default(uuid())
+  filename String
+  kind     ImportKind
+  status   ImportStatus @default(simulado)
+  dryRun   Boolean      @default(true) @map("dry_run")
+
+  profileId String?        @map("profile_id")
+  profile   ImportProfile? @relation(fields: [profileId], references: [id], onDelete: SetNull)
+
+  rowsTotal      Int @default(0) @map("rows_total")
+  rowsCreated    Int @default(0) @map("rows_created")
+  rowsUpdated    Int @default(0) @map("rows_updated")
+  rowsSkipped    Int @default(0) @map("rows_skipped")
+  rowsError      Int @default(0) @map("rows_error")
+  imagesUploaded Int @default(0) @map("images_uploaded")
+
+  /// Prévia do diff e a lista de erros linha a linha
+  report   Json?
+  /// Valores anteriores, para o desfazer
+  snapshot Json?
+  error    String?
+
+  actorId    String?   @map("actor_id")
+  actorName  String?   @map("actor_name")
+  startedAt  DateTime  @default(now()) @map("started_at")
+  finishedAt DateTime? @map("finished_at")
+
+  @@index([status, startedAt])
+  @@map("import_runs")
+}
+
+enum ExportFormat {
+  csv
+  xlsx
+  /// Planilha + as imagens, para a ida e volta completa
+  zip
+
+  @@map("export_format")
+}
+
+enum ExportStatus {
+  processando
+  concluido
+  falhou
+  expirado
+
+  @@map("export_status")
+}
+
+model ExportProfile {
+  id      String @id @default(uuid())
+  name    String @unique
+  /// Colunas na ordem desejada
+  columns Json
+  filters Json   @default("{}")
+
+  createdAt DateTime @default(now())
+
+  @@map("export_profiles")
+}
+
+model ExportRun {
+  id            String       @id @default(uuid())
+  format        ExportFormat
+  status        ExportStatus @default(processando)
+  filters       Json         @default("{}")
+  columns       Json         @default("[]")
+  includeImages Boolean      @default(false) @map("include_images")
+
+  rowsTotal Int     @default(0) @map("rows_total")
+  fileKey   String? @map("file_key")
+  fileUrl   String? @map("file_url")
+  fileSize  Int?    @map("file_size")
+  error     String?
+
+  /// Link temporário: arquivo de catálogo não fica disponível para sempre
+  expiresAt DateTime? @map("expires_at")
+
+  actorId    String?   @map("actor_id")
+  actorName  String?   @map("actor_name")
+  createdAt  DateTime  @default(now())
+  finishedAt DateTime? @map("finished_at")
+
+  @@index([status, createdAt])
+  @@map("export_runs")
+}
+
+/// Termos buscados na vitrine.
+///
+/// Busca sem resultado é a informação mais barata que uma loja pode ter: diz
+/// exatamente o que o cliente procurou e não achou — produto que falta no
+/// catálogo, foto que falta, ou palavra que a loja chama de outro jeito.
+model SearchQuery {
+  id           String   @id @default(uuid())
+  term         String
+  /// Normalizado, sem acento e minúsculo — é por aqui que se agrupa.
+  normalized   String
+  resultsCount Int      @map("results_count")
+  createdAt    DateTime @default(now())
+
+  @@index([normalized, createdAt])
+  @@index([resultsCount, createdAt])
+  @@map("search_queries")
+}
+
+// ──────────────────────────── Carrinho e pedidos ───────────────────────────
+
+/// Carrinho.
+///
+/// Convidado é identificado por um token de sessão em cookie httpOnly, e não
+/// por um id adivinhável: quem tiver o token vê e edita o carrinho. Ao entrar
+/// numa conta, o carrinho de convidado é adotado pelo cliente.
+///
+/// Expira sozinho — carrinho abandonado de dois meses atrás não é intenção de
+/// compra, é lixo com preço velho.
+model Cart {
+  id           String    @id @default(uuid())
+  sessionToken String    @unique @map("session_token")
+  customerId   String?   @map("customer_id")
+  customer     Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
+
+  couponCode String?  @map("coupon_code")
+  expiresAt  DateTime @map("expires_at")
+
+  items     CartItem[]
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+
+  @@index([customerId])
+  @@index([expiresAt])
+  @@map("carts")
+}
+
+/// Item do carrinho.
+///
+/// Guarda só a quantidade e a referência ao produto: o preço é sempre lido do
+/// catálogo na hora de exibir. Congelar preço aqui faria o carrinho mostrar um
+/// valor que a loja não pratica mais — o congelamento acontece no pedido, que
+/// é o documento da negociação.
+model CartItem {
+  id        String          @id @default(uuid())
+  cartId    String          @map("cart_id")
+  cart      Cart            @relation(fields: [cartId], references: [id], onDelete: Cascade)
+  productId String          @map("product_id")
+  product   Product         @relation(fields: [productId], references: [id], onDelete: Cascade)
+  variantId String?         @map("variant_id")
+  variant   ProductVariant? @relation(fields: [variantId], references: [id], onDelete: Cascade)
+
+  qty Decimal @db.Decimal(10, 3)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Dois NULL são distintos no Postgres, então este índice não impede duas
+  // linhas do mesmo produto sem variação. A brecha é fechada pelo índice
+  // parcial `cart_items_produto_sem_variacao`, na migration desta sprint.
+  @@unique([cartId, productId, variantId])
+  @@index([cartId])
+  @@map("cart_items")
+}
+
+enum OrderStatus {
+  novo
+  em_atendimento
+  aguardando_pagamento
+  pago
+  separado
+  entregue
+  retirado
+  cancelado
+  perdido
+
+  @@map("order_status")
+}
+
+enum OrderSource {
+  web
+  instagram
+  google
+  direto
+
+  @@map("order_source")
+}
+
+enum OrderEventType {
+  criado
+  status_alterado
+  nota_interna
+  whatsapp_aberto
+  email_enviado
+  valor_fechado
+
+  @@map("order_event_type")
+}
+
+/// Pedido — que aqui é um orçamento.
+///
+/// Não há pagamento no site: o pedido registra a intenção, gera o código e a
+/// mensagem, e a venda é fechada no WhatsApp. Por isso existem dois valores:
+/// `totalEstimate`, calculado pelo site, e `finalValue`, que o atendente
+/// preenche ao fechar — é este que vale no relatório.
+model Order {
+  id   String @id @default(uuid())
+  /// "CP-2026-0001" — o que o cliente e a atendente falam em voz alta.
+  code String @unique
+
+  /// Token da página pública `/p/:code`. Não sequencial e não adivinhável: o
+  /// código do pedido sozinho não dá acesso aos dados de quem comprou.
+  publicToken String   @unique @map("public_token")
+  /// A página pública some depois disso — não é arquivo, é conveniência.
+  publicUntil DateTime @map("public_until")
+
+  customerId String?   @map("customer_id")
+  customer   Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  guestName  String    @map("guest_name")
+  guestPhone String    @map("guest_phone")
+  guestEmail String?   @map("guest_email")
+
+  status OrderStatus @default(novo)
+  source OrderSource @default(web)
+
+  subtotal      Decimal  @db.Decimal(10, 2)
+  discount      Decimal  @default(0) @db.Decimal(10, 2)
+  totalEstimate Decimal  @map("total_estimate") @db.Decimal(10, 2)
+  /// Preenchido pelo atendente ao fechar. Nulo enquanto a venda está aberta.
+  finalValue    Decimal? @map("final_value") @db.Decimal(10, 2)
+
+  deliveryMethodId String?         @map("delivery_method_id")
+  deliveryMethod   DeliveryMethod? @relation(fields: [deliveryMethodId], references: [id])
+  /// Rótulo congelado: se a loja renomear a forma de entrega, o pedido antigo
+  /// continua dizendo o que foi combinado na época.
+  deliveryLabel    String          @map("delivery_label")
+  /// Bairro ou referência que o cliente digitou. Não calcula nada — adianta o
+  /// trabalho do atendente.
+  deliveryNote     String?         @map("delivery_note")
+
+  couponCode String? @map("coupon_code")
+  lostReason String? @map("lost_reason")
+
+  notesCustomer String? @map("notes_customer")
+  notesInternal String? @map("notes_internal")
+
+  /// Quando o cliente realmente abriu o WhatsApp. Mede quantos pedidos viram
+  /// conversa de verdade — a métrica que diz se o funil funciona.
+  whatsappClickedAt DateTime? @map("whatsapp_clicked_at")
+  closedAt          DateTime? @map("closed_at")
+
+  items       OrderItem[]
+  events      OrderEvent[]
+  redemptions CouponRedemption[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status, createdAt])
+  @@index([createdAt])
+  @@index([guestPhone])
+  @@map("orders")
+}
+
+/// Item do pedido, congelado.
+///
+/// `productSnapshot` guarda nome, unidade, foto e variação como estavam no
+/// momento do pedido. O produto pode ser renomeado, ficar sem foto ou sair do
+/// catálogo — o pedido continua legível anos depois, e a atendente vê o que a
+/// cliente viu.
+model OrderItem {
+  id      String @id @default(uuid())
+  orderId String @map("order_id")
+  order   Order  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  productId String? @map("product_id")
+  variantId String? @map("variant_id")
+
+  /// { name, slug, unit, packSize, imageUrl, variantName, sku }
+  productSnapshot Json    @map("product_snapshot")
+  qty             Decimal @db.Decimal(10, 3)
+  unitPrice       Decimal @map("unit_price") @db.Decimal(10, 2)
+  lineTotal       Decimal @map("line_total") @db.Decimal(10, 2)
+
+  @@index([orderId])
+  @@map("order_items")
+}
+
+/// Linha do tempo do pedido.
+///
+/// Toda mudança de status, nota e clique vira um evento. É o que permite
+/// responder "o que aconteceu com este pedido?" sem depender da memória de
+/// quem atendeu.
+model OrderEvent {
+  id      String         @id @default(uuid())
+  orderId String         @map("order_id")
+  order   Order          @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  type    OrderEventType
+
+  /// { de, para } na mudança de status; { texto } na nota.
+  payload Json?
+
+  actorId String?    @map("actor_id")
+  actor   AdminUser? @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+
+  @@index([orderId, createdAt])
+  @@map("order_events")
+}
+
+enum CouponType {
+  percent
+  fixed
+
+  @@map("coupon_type")
+}
+
+model Coupon {
+  id    String     @id @default(uuid())
+  code  String     @unique
+  type  CouponType
+  /// Percentual (0–100) ou valor em reais, conforme o `type`.
+  value Decimal    @db.Decimal(10, 2)
+
+  minSubtotal      Decimal?  @map("min_subtotal") @db.Decimal(10, 2)
+  usageLimit       Int?      @map("usage_limit")
+  usedCount        Int       @default(0) @map("used_count")
+  perCustomerLimit Int?      @map("per_customer_limit")
+  startsAt         DateTime? @map("starts_at")
+  endsAt           DateTime? @map("ends_at")
+  active           Boolean   @default(true)
+  /// Aparece em "Cupons" na conta do cliente. Desligado, o cupom só funciona
+  /// para quem recebeu o código — o de parceria, o de influenciadora.
+  listed           Boolean   @default(false)
+  /// "10% em todos os tecidos até domingo."
+  description      String?
+
+  redemptions CouponRedemption[]
+  createdAt   DateTime           @default(now())
+  updatedAt   DateTime           @updatedAt
+
+  @@map("coupons")
+}
+
+model CouponRedemption {
+  id         String    @id @default(uuid())
+  couponId   String    @map("coupon_id")
+  coupon     Coupon    @relation(fields: [couponId], references: [id], onDelete: Cascade)
+  orderId    String    @map("order_id")
+  order      Order     @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  customerId String?   @map("customer_id")
+  customer   Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+
+  @@unique([couponId, orderId])
+  @@index([couponId, customerId])
+  @@map("coupon_redemptions")
+}
+
+/// Contador do código do pedido, por ano.
+///
+/// Uma linha por ano, incrementada dentro da transação que cria o pedido. É o
+/// que garante "CP-2026-0001" sequencial e sem buraco mesmo com dois pedidos
+/// simultâneos — `MAX(code) + 1` daria o mesmo número para os dois.
+model OrderCounter {
+  year      Int      @id
+  lastValue Int      @default(0) @map("last_value")
+  updatedAt DateTime @updatedAt
+
+  @@map("order_counters")
+}
+
+// ──────────────────────────── Conta do cliente ─────────────────────────────
+
+/// Sessão da vitrine.
+///
+/// Token opaco em cookie httpOnly, e não JWT como no painel: a vitrine é
+/// renderizada no servidor e o painel não. Um cookie serve aos dois lados, e
+/// apagar a linha derruba a sessão na hora — sem esperar token expirar.
+///
+/// Guardamos só o HMAC do token: quem ler esta tabela não entra em conta
+/// nenhuma.
+model CustomerSession {
+  id         String    @id @default(uuid())
+  customerId String    @map("customer_id")
+  customer   Customer  @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  tokenHash  String    @unique @map("token_hash")
+  userAgent  String?   @map("user_agent")
+  ip         String?
+  expiresAt  DateTime  @map("expires_at")
+  revokedAt  DateTime? @map("revoked_at")
+  createdAt  DateTime  @default(now())
+  lastUsedAt DateTime  @default(now()) @map("last_used_at")
+
+  @@index([customerId, revokedAt])
+  @@map("customer_sessions")
+}
+
+enum CustomerTokenPurpose {
+  magic_link
+  verificar_email
+  redefinir_senha
+
+  @@map("customer_token_purpose")
+}
+
+/// Link de uso único enviado por e-mail: entrar sem senha, confirmar o
+/// e-mail, trocar a senha esquecida.
+///
+/// Uso único de verdade: `usedAt` preenchido invalida o link, mesmo dentro da
+/// validade. Um link de login que continua valendo depois de usado é uma
+/// senha escrita na caixa de entrada de alguém.
+model CustomerToken {
+  id         String               @id @default(uuid())
+  customerId String               @map("customer_id")
+  customer   Customer             @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  purpose    CustomerTokenPurpose
+  tokenHash  String               @unique @map("token_hash")
+  expiresAt  DateTime             @map("expires_at")
+  usedAt     DateTime?            @map("used_at")
+  createdAt  DateTime             @default(now())
+
+  @@index([customerId, purpose])
+  @@map("customer_tokens")
+}
+
+/// Endereço do cliente.
+///
+/// Serve para adiantar o trabalho da atendente, não para calcular frete —
+/// entrega por motoboy é sempre "consultar valor". O bairro é o que entra na
+/// mensagem do WhatsApp.
+model Address {
+  id         String   @id @default(uuid())
+  customerId String   @map("customer_id")
+  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  /// "Casa", "Ateliê".
+  label      String?
+  cep        String
+  street     String
+  number     String
+  complement String?
+  district   String
+  city       String
+  uf         String   @db.Char(2)
+  reference  String?
+  isDefault  Boolean  @default(false) @map("is_default")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([customerId])
+  @@map("addresses")
+}
+
+/// Favorito de quem tem conta.
+///
+/// Quem não tem conta guarda no `localStorage`; ao entrar, as duas listas são
+/// unidas — nunca uma sobrescreve a outra.
+model Favorite {
+  customerId String   @map("customer_id")
+  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  productId  String   @map("product_id")
+  product    Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  createdAt  DateTime @default(now())
+
+  @@id([customerId, productId])
+  @@index([customerId, createdAt])
+  @@map("favorites")
+}
+
+enum NotificationType {
+  pedido_recebido
+  status_alterado
+  cupom_novo
+  conta
+
+  @@map("notification_type")
+}
+
+/// Aviso dentro da conta do cliente.
+///
+/// Uma linha por cliente, inclusive no cupom novo que vai para todos: é o que
+/// permite marcar como lida por pessoa sem uma tabela de leitura à parte. Com
+/// o tamanho desta clientela, a inserção em lote custa milissegundos.
+model Notification {
+  id         String           @id @default(uuid())
+  customerId String           @map("customer_id")
+  customer   Customer         @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  type       NotificationType
+  title      String
+  body       String
+  /// Para onde o aviso leva: "/conta/pedidos/CP-2026-0001".
+  link       String?
+  readAt     DateTime?        @map("read_at")
+  createdAt  DateTime         @default(now())
+
+  @@index([customerId, readAt, createdAt])
+  @@map("notifications")
+}
+
+// ──────────────────────────── Conteúdo e cursos ────────────────────────────
+
+enum BannerTone {
+  marca
+  destaque
+  escuro
+
+  @@map("banner_tone")
+}
+
+/// Banner da home.
+///
+/// A imagem é opcional de propósito: sem ela, o banner vira texto sobre a cor
+/// da marca — é assim que a home já é hoje, e é o que permite à loja publicar
+/// uma campanha num dia sem foto pronta.
+model Banner {
+  id              String     @id @default(uuid())
+  title           String
+  subtitle        String?
+  ctaLabel        String?    @map("cta_label")
+  ctaUrl          String?    @map("cta_url")
+  /// Larga, para computador.
+  imageDesktopUrl String?    @map("image_desktop_url")
+  /// Alta, para celular. Sem ela, o celular usa a de computador.
+  imageMobileUrl  String?    @map("image_mobile_url")
+  imageAlt        String?    @map("image_alt")
+  tone            BannerTone @default(marca)
+  startsAt        DateTime?  @map("starts_at")
+  endsAt          DateTime?  @map("ends_at")
+  active          Boolean    @default(true)
+  position        Int        @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([active, position])
+  @@map("banners")
+}
+
+enum HomeSectionType {
+  banners
+  categorias
+  ofertas
+  colecoes
+  cursos
+  novidades
+  texto
+
+  @@map("home_section_type")
+}
+
+/// Bloco da home, na ordem em que aparece.
+///
+/// Tabela vazia é a home padrão. É o que deixa a vitrine funcionar desde o
+/// primeiro deploy sem que ninguém precise configurar nada.
+model HomeSection {
+  id       String          @id @default(uuid())
+  type     HomeSectionType
+  /// Título exibido. Vazio usa o nome padrão do bloco.
+  title    String?
+  /// Só no bloco de texto: markdown.
+  content  String?
+  position Int
+  active   Boolean         @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([position])
+  @@map("home_sections")
+}
+
+/// Página institucional: Sobre, Trocas, Privacidade, Termos.
+///
+/// Nasce como rascunho. Texto de política e de história da loja precisa da
+/// revisão de quem responde por ela antes de ir ao ar.
+model Page {
+  id          String    @id @default(uuid())
+  slug        String    @unique
+  title       String
+  /// Markdown. Nunca HTML: ver `parseMarkdown` no pacote de tipos.
+  content     String    @default("")
+  /// { title, description }
+  seo         Json?
+  published   Boolean   @default(false)
+  publishedAt DateTime? @map("published_at")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("pages")
+}
+
+enum CourseLevel {
+  todos
+  iniciante
+  intermediario
+  avancado
+
+  @@map("course_level")
+}
+
+/// Curso ou workshop presencial.
+///
+/// O curso é o que se ensina; a turma é quando e onde. Um curso de crochê
+/// para iniciantes tem várias turmas ao longo do ano.
+model Course {
+  id              String      @id @default(uuid())
+  title           String
+  slug            String      @unique
+  summary         String?
+  /// Markdown.
+  description     String?
+  coverUrl        String?     @map("cover_url")
+  price           Decimal     @db.Decimal(10, 2)
+  durationMinutes Int?        @map("duration_minutes")
+  level           CourseLevel @default(todos)
+  /// "Material incluso" ou "Traga: agulha 3,5mm e 2 novelos". Texto livre.
+  materials       String?
+  active          Boolean     @default(true)
+  position        Int         @default(0)
+
+  sessions  CourseSession[]
+  createdAt DateTime        @default(now())
+  updatedAt DateTime        @updatedAt
+
+  @@index([active, position])
+  @@map("courses")
+}
+
+model CourseSession {
+  id         String    @id @default(uuid())
+  courseId   String    @map("course_id")
+  course     Course    @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  startsAt   DateTime  @map("starts_at")
+  endsAt     DateTime  @map("ends_at")
+  room       String?
+  instructor String?
+  instructorPhone      String?   @map("instructor_phone")
+  /// "fixo" (centavos) | "porcentagem" (0-100)
+  instructorFeeType    String?   @map("instructor_fee_type")
+  instructorFee        Int?      @map("instructor_fee")
+  instructorPaidAmount Int?      @map("instructor_paid_amount")
+  instructorPaidAt     DateTime? @map("instructor_paid_at")
+  seatsTotal Int       @map("seats_total")
+  notes      String?
+  /// Cancelada não some da agenda de quem já se inscreveu — aparece como
+  /// cancelada, e a loja avisa cada pessoa pelo WhatsApp.
+  cancelledAt DateTime? @map("cancelled_at")
+
+  enrollments CourseEnrollment[]
+  createdAt   DateTime           @default(now())
+  updatedAt   DateTime           @updatedAt
+
+  @@index([courseId, startsAt])
+  @@index([startsAt])
+  @@map("course_sessions")
+}
+
+enum EnrollmentStatus {
+  pendente
+  confirmada
+  lista_de_espera
+  cancelada
+
+  @@map("enrollment_status")
+}
+
+enum PaymentMethod {
+  pix
+  dinheiro
+  cartao
+  cortesia
+
+  @@map("payment_method")
+}
+
+/// Inscrição numa turma.
+///
+/// Feita pelo site, nasce pendente: é intenção, como o pedido. Só a
+/// confirmação da loja, depois da conversa no WhatsApp, ocupa a vaga.
+model CourseEnrollment {
+  id         String           @id @default(uuid())
+  sessionId  String           @map("session_id")
+  session    CourseSession    @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  customerId String?          @map("customer_id")
+  customer   Customer?        @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  name       String
+  phone      String
+  email      String?
+  status     EnrollmentStatus @default(pendente)
+  /// Nota da loja — a cliente não vê.
+  notes      String?
+  /// Data em que o pagamento foi confirmado pela loja.
+  paidAt        DateTime?      @map("paid_at")
+  /// Valor efetivamente pago, em centavos. Zero para cortesia.
+  paidAmount    Int?           @map("paid_amount")
+  /// Valor total combinado com o aluno, em centavos. Pode diferir do preço do curso (desconto).
+  totalAmount   Int?           @map("total_amount")
+  paymentMethod PaymentMethod? @map("payment_method")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([sessionId, status])
+  @@index([phone])
+  @@map("course_enrollments")
+}
+
+// ──────────────────────────── Tarefas internas ──────────────────────────────
+
+enum TaskStatus {
+  a_fazer
+  em_andamento
+  aguardando
+  concluido
+
+  @@map("task_status")
+}
+
+enum TaskPriority {
+  alta
+  normal
+  baixa
+
+  @@map("task_priority")
+}
+
+model Task {
+  id          String       @id @default(uuid())
+  title       String
+  description String?
+  status      TaskStatus   @default(a_fazer)
+  priority    TaskPriority @default(normal)
+  assigneeId  String?      @map("assignee_id")
+  assignee    AdminUser?   @relation("TaskAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
+  createdById String       @map("created_by_id")
+  createdBy   AdminUser    @relation("TaskCreatedBy", fields: [createdById], references: [id])
+  dueDate     DateTime?    @map("due_date")
+  createdAt   DateTime     @default(now()) @map("created_at")
+  updatedAt   DateTime     @updatedAt @map("updated_at")
+
+  @@index([status])
+  @@map("tasks")
+}
