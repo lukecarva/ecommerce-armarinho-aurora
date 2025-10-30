@@ -1,0 +1,7 @@
+@import 'tailwindcss';
+
+/* Tokens da marca — fonte única, compartilhada com o painel admin. */
+@import '../../../../packages/ui/src/styles/theme.css';
+
+/* O Tailwind precisa enxergar as classes usadas dentro do design system. */
+@source '../../../../packages/ui/src';
