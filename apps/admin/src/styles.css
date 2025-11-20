@@ -1,0 +1,6 @@
+@import 'tailwindcss';
+
+/* Mesmos tokens da vitrine — painel e loja falam a mesma língua visual. */
+@import '../../../packages/ui/src/styles/theme.css';
+
+@source '../../../packages/ui/src';
