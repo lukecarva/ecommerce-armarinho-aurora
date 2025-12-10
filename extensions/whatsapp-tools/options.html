@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>WhatsApp Tools — Configurações</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      margin: 0;
+      padding: 20px 24px;
+      min-width: 320px;
+      max-width: 480px;
+      color: #111;
+    }
+    .header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 20px;
+      padding-bottom: 16px;
+      border-bottom: 1px solid #eee;
+    }
+    .logo {
+      width: 36px;
+      height: 36px;
+      background: #1B3A8C;
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #fff;
+      font-weight: 800;
+      font-size: 14px;
+    }
+    h1 { font-size: 15px; font-weight: 700; margin: 0; }
+    p.sub { font-size: 12px; color: #888; margin: 2px 0 0; }
+
+    label {
+      display: block;
+      font-size: 13px;
+      font-weight: 600;
+      margin-bottom: 6px;
+      color: #333;
+    }
+    input[type="url"], input[type="text"] {
+      width: 100%;
+      padding: 8px 10px;
+      border: 1px solid #ddd;
+      border-radius: 6px;
+      font-size: 13px;
+      color: #111;
+      outline: none;
+      transition: border-color .15s;
+    }
+    input:focus { border-color: #1B3A8C; }
+
+    .field { margin-bottom: 16px; }
+    .hint { font-size: 11px; color: #999; margin-top: 4px; }
+
+    button {
+      width: 100%;
+      padding: 9px 16px;
+      background: #1B3A8C;
+      color: #fff;
+      border: none;
+      border-radius: 6px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background .15s;
+    }
+    button:hover { background: #152f75; }
+
+    #status {
+      margin-top: 10px;
+      font-size: 12px;
+      color: #16a34a;
+      text-align: center;
+      min-height: 18px;
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div class="logo">CP</div>
+    <div>
+      <h1>Armarinho Aurora - WhatsApp Tools</h1>
+      <p class="sub">Configurações da extensão</p>
+    </div>
+  </div>
+
+  <div class="field">
+    <label for="painelUrl">URL do painel administrativo</label>
+    <input
+      id="painelUrl"
+      type="url"
+      placeholder="https://painel.armarinhoaurora.com.br"
+    />
+    <p class="hint">
+      Sem barra no final. O botão "Pedido" vai abrir <em>URL/pedidos?novo=1&amp;…</em>
+    </p>
+  </div>
+
+  <button id="salvar">Salvar</button>
+  <div id="status"></div>
+
+  <script src="options.js"></script>
+</body>
+</html>
