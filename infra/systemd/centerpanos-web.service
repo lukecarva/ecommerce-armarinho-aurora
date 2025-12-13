@@ -1,0 +1,36 @@
+[Unit]
+Description=Armarinho Aurora - Vitrine Next.js (homologacao)
+After=network.target aurora-api.service
+Wants=aurora-api.service
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/aurora-homolog/apps/web
+ExecStart=/usr/bin/pnpm start
+Restart=on-failure
+RestartSec=5
+
+# Servidor compartilhado com seis sites em producao: teto de memoria e
+# prioridade baixa para a homologacao nunca derrubar os vizinhos.
+MemoryMax=500M
+MemoryHigh=400M
+Nice=10
+CPUWeight=50
+
+Environment=NODE_ENV=production
+Environment=PORT=3000
+# A renderizacao no servidor fala com a API pelo loopback: nao passa pelo
+# nginx nem pela senha da homologacao.
+Environment=API_INTERNAL_URL=http://127.0.0.1:3333/api
+Environment=NEXT_PUBLIC_API_URL=https://homolog.armarinhoaurora.com.br/api
+Environment=NEXT_PUBLIC_SITE_URL=https://homolog.armarinhoaurora.com.br
+
+StandardOutput=append:/var/log/aurora-web.log
+StandardError=append:/var/log/aurora-web.log
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target
