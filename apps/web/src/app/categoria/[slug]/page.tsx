@@ -5,6 +5,7 @@ import { notFound } from 'next/navigation';
 import { Listagem } from '@/components/listagem';
 import { Trilha } from '@/components/vitrine';
 import { getCategoria, getFacetas, getProdutos } from '@/lib/api';
+import { jsonLd } from '@/lib/json-ld';
 
 /** A listagem é revalidada a cada 5 minutos, como a home. */
 export const revalidate = 300;
@@ -78,7 +79,7 @@ export default async function CategoriaPage({ params, searchParams }: Parametros
       <script
         type="application/ld+json"
         dangerouslySetInnerHTML={{
-          __html: JSON.stringify({
+          __html: jsonLd({
             '@context': 'https://schema.org',
             '@type': 'BreadcrumbList',
             itemListElement: categoria.trilha.map((item, indice) => ({

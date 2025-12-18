@@ -54,10 +54,13 @@ async function bootstrap(): Promise<void> {
     .addTag('Admin — Usuários', 'Usuários, papéis e permissões')
     .build();
 
-  const document = SwaggerModule.createDocument(app, config);
-  SwaggerModule.setup(`${env.API_PREFIX}/docs`, app, document, {
-    customSiteTitle: 'Armarinho Aurora — API',
-  });
+  // A documentação expõe toda a superfície da API — só fora de produção.
+  if (env.NODE_ENV !== 'production') {
+    const document = SwaggerModule.createDocument(app, config);
+    SwaggerModule.setup(`${env.API_PREFIX}/docs`, app, document, {
+      customSiteTitle: 'Armarinho Aurora — API',
+    });
+  }
 
   await app.listen(env.API_PORT);
 

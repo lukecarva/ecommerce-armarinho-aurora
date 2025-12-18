@@ -8,8 +8,8 @@
  */
 const AMBIENTE_DE_TESTE: Record<string, string> = {
   DATABASE_URL: 'postgresql://teste:teste@localhost:5432/teste',
-  JWT_ACCESS_SECRET: 'segredo-de-teste-access-0000',
-  JWT_REFRESH_SECRET: 'segredo-de-teste-refresh-0000',
+  JWT_ACCESS_SECRET: 'segredo-de-teste-access-000000000000',
+  JWT_REFRESH_SECRET: 'segredo-de-teste-refresh-00000000000',
   S3_ENDPOINT: 'http://localhost:9000',
   S3_ACCESS_KEY_ID: 'teste',
   S3_SECRET_ACCESS_KEY: 'teste',

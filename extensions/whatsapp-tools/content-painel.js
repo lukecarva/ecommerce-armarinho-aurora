@@ -14,6 +14,10 @@
   document.documentElement.setAttribute('data-cp-ext', '1');
 
   window.addEventListener('message', (e) => {
+    // Só aceita mensagens postadas pela própria página (mesma janela), nunca de
+    // iframes ou outras janelas — evita que um frame de terceiros dispare ações.
+    if (e.source !== window) return;
+
     // Abrir conversa: pede ao background pra focar a aba do WhatsApp e abrir o chat.
     if (e.data?.type === 'CP_ABRIR_CONVERSA') {
       const fone = normFone(e.data.phone);

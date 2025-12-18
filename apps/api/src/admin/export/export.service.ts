@@ -11,6 +11,24 @@ import { toCents, toCentsOrNull, toQuantity } from '../../common/decimal';
 import { PrismaService } from '../../prisma/prisma.service';
 
 /**
+ * Só baixamos imagens do próprio bucket (host de `S3_PUBLIC_URL`).
+ *
+ * As URLs vêm sempre do media (S3), mas validar o host aqui fecha a porta a
+ * SSRF caso uma URL externa chegue a ser gravada no futuro: sem isso, uma URL
+ * apontando para `169.254.169.254` ou para a rede interna seria buscada pelo
+ * servidor durante a exportação.
+ */
+function hostDoBucket(url: string): boolean {
+  try {
+    const base = process.env.S3_PUBLIC_URL;
+    if (!base) return false;
+    return new URL(url).host === new URL(base).host;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Exportação de catálogo.
  *
  * Sai no **mesmo formato que o importador aceita de volta**. Essa ida e volta
@@ -406,7 +424,7 @@ export class ExportService {
   private async baixarMiniatura(
     url: string | undefined,
   ): Promise<{ buffer: Buffer; extension: 'jpeg' | 'png' } | null> {
-    if (!url) return null;
+    if (!url || !hostDoBucket(url)) return null;
 
     try {
       const resposta = await fetch(url, { signal: AbortSignal.timeout(8000) });
@@ -475,6 +493,8 @@ export class ExportService {
   }
 
   private async baixarImagem(url: string): Promise<{ buffer: Buffer; extensao: string } | null> {
+    if (!hostDoBucket(url)) return null;
+
     try {
       const resposta = await fetch(url, { signal: AbortSignal.timeout(15000) });
       if (!resposta.ok) return null;

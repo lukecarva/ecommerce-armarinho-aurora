@@ -5,6 +5,7 @@ import { notFound } from 'next/navigation';
 import { GradeDeProdutos, Trilha } from '@/components/vitrine';
 import { DetalheDoProduto } from '@/components/produto';
 import { getProduto, getStore } from '@/lib/api';
+import { jsonLd } from '@/lib/json-ld';
 
 /**
  * Página de produto.
@@ -80,7 +81,7 @@ export default async function ProdutoPage({ params }: Parametros) {
       <script
         type="application/ld+json"
         dangerouslySetInnerHTML={{
-          __html: JSON.stringify({
+          __html: jsonLd({
             '@context': 'https://schema.org',
             '@type': 'Product',
             name: produto.name,
@@ -106,7 +107,7 @@ export default async function ProdutoPage({ params }: Parametros) {
       <script
         type="application/ld+json"
         dangerouslySetInnerHTML={{
-          __html: JSON.stringify({
+          __html: jsonLd({
             '@context': 'https://schema.org',
             '@type': 'BreadcrumbList',
             itemListElement: [

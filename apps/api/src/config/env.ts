@@ -36,8 +36,8 @@ const envSchema = z.object({
     ),
 
   // ── Autenticação do painel ────────────────────────────────────────────────
-  JWT_ACCESS_SECRET: z.string().min(16, 'Use um segredo com pelo menos 16 caracteres'),
-  JWT_REFRESH_SECRET: z.string().min(16, 'Use um segredo com pelo menos 16 caracteres'),
+  JWT_ACCESS_SECRET: z.string().min(32, 'Use um segredo com pelo menos 32 caracteres'),
+  JWT_REFRESH_SECRET: z.string().min(32, 'Use um segredo com pelo menos 32 caracteres'),
   JWT_ACCESS_TTL: z.string().default('15m'),
   JWT_REFRESH_TTL: z.string().default('30d'),
 
